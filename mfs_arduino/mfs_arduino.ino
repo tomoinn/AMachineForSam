@@ -1,11 +1,13 @@
+// Code for Sam's machine, drives the WS2083 and reads switch data.
+
 #include "lightStructs.h"
+#define nLEDs 18
 
 const int ws2803_clockPin = 11;
 const int ws2803_dataPin = 12;
 
-#define nLEDs 18
-
 uint8_t ledBar[nLEDs]; // Array representing LED PWM levels (byte size)
+int i = 0;
 
 void setup() {
 
@@ -21,19 +23,22 @@ void setup() {
     ledBar[wsOut] = 0x00;
   }
   loadWS2803();
+  
 }
 
-int i = 0;
-int value;
+// Currently just rolls the LEDs around the colour wheel as a test.
 void loop() {
+
   for (int led = 0; led < 6; led++) {
     setPixel(led, hsvToColour(i+(led*255/6), 255, 255)); 
   }
   i++;
   loadWS2803();
   delay(40);
-} //loop
 
+} 
+
+// Push data to the LEDs from the buffer.
 void loadWS2803(){
   for (int wsOut = 0; wsOut < nLEDs; wsOut++){
     shiftOut(ws2803_dataPin, ws2803_clockPin, MSBFIRST, ledBar[wsOut]);
@@ -41,12 +46,14 @@ void loadWS2803(){
   delayMicroseconds(600); // 600us needed to reset WS2803s
 }
 
+// Set the value of the given RGB LED in the buffer.
 void setPixel(int index, RGB colour) {
   ledBar[index*3]=colour.r;
   ledBar[index*3+1]=colour.g;
   ledBar[index*3+2]=colour.b;
 }
 
+// Build an RGB value from HSV, all values are 0-255
 RGB hsvToColour(unsigned int h, unsigned int s, unsigned int v) {
   unsigned char region, remainder, p, q, t;
   h = (h+256) % 256;
