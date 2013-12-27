@@ -3,14 +3,25 @@
 #include "lightStructs.h"
 #define nLEDs 18
 
-const int ws2803_clockPin = 11;
-const int ws2803_dataPin = 12;
+// Clock and Data pin definitions for the WS2803
+const int ws2803_clockPin = 12;
+const int ws2803_dataPin = 11;
 
-uint8_t ledBar[nLEDs]; // Array representing LED PWM levels (byte size)
-int i = 0;
+// Array representing LED PWM levels (byte size)
+uint8_t ledBar[nLEDs]; 
+
+// Accumulate deltas, these can be reset at any point and track the
+// number of ticks on the respective cogs since the last reset.
+int aDelta, bDelta, cDelta;
+
+// Track previous values of the switches (held as s1+(s2<<1) where s1 
+// and s2 are the digital inputs (0-1) of the microswitches connected
+// to a given cog's spindle.
+int a,b,c;
 
 void setup() {
-
+  Serial.begin(19200);
+  
   pinMode(ws2803_clockPin, OUTPUT);
   pinMode(ws2803_dataPin, OUTPUT);
 
@@ -23,27 +34,100 @@ void setup() {
     ledBar[wsOut] = 0x00;
   }
   loadWS2803();
-  
+  a = digitalRead(6) + (digitalRead(3) << 1);
+  b = digitalRead(5) + (digitalRead(8) << 1);
+  c = digitalRead(4) + (digitalRead(7) << 1);
+  aDelta = 0;
+  bDelta = 256 / 3;
+  cDelta = 512 / 3;
 }
 
-// Currently just rolls the LEDs around the colour wheel as a test.
+int fudgeDelta = 1;
+int fudgeMax = 100;
+int fudge = 0;
+
 void loop() {
-
-  for (int led = 0; led < 6; led++) {
-    setPixel(led, hsvToColour(i+(led*255/6), 255, 255)); 
+  calculateEncoderDeltas(5);
+  RGB colA = hsvToColour(aDelta+fudge/10, 255, 255);
+  RGB colB = hsvToColour(bDelta+fudge/10, 255, 255);
+  RGB colC = hsvToColour(cDelta+fudge/10, 255, 255);
+  setPixel(2, colA);
+  setPixel(4, colB);
+  setPixel(0, colC);
+  blendWS2803(1);
+  blendWS2803(3);
+  blendWS2803(5);
+  aDelta = aDelta % 256;
+  bDelta = bDelta % 256;
+  cDelta = cDelta % 256;
+  fudge += fudgeDelta;
+  if (fudge > fudgeMax) {
+    fudge = fudgeMax;
+    fudgeDelta = -fudgeDelta;
   }
-  i++;
+  else if (fudge < 0) {
+    fudge = 0;
+    fudgeDelta = -fudgeDelta;
+  }
   loadWS2803();
-  delay(40);
-
 } 
+
+
+
+// Read values from the switches and use the encoderDelta() method
+// to modify the values of aDelta etc based on any detected motion.
+void calculateEncoderDeltas(int increment) {
+  int newA = digitalRead(6) + (digitalRead(3) << 1);
+  int newB = digitalRead(4) + (digitalRead(7) << 1);
+  int newC = digitalRead(5) + (digitalRead(8) << 1);
+  aDelta += encoderDelta(a, newA) * increment;
+  bDelta += encoderDelta(b, newB) * increment;
+  cDelta += encoderDelta(c, newC) * increment;
+  a = newA;
+  b = newB;
+  c = newC;
+}
+
+// These are the new values which indicate clockwise rotation
+// on the encoders. If the old value is n then the new value which
+// indicates a clockwise tick is clockwise[n]
+const int clockwise[] = {2,0,3,1};
+
+// Given an old and new value work out whether this represents
+// no movement (if equal) or either positive or negative ticks.
+// Uses the clockwise[] array to determine direction.
+int encoderDelta(int oldValue, int newValue) {
+  if (oldValue == newValue) {
+    return 0;
+  }
+  if (newValue == clockwise[oldValue]) {
+    return 1;
+  }
+  return -1;
+}
+
+// Reset delta values to zero.
+void resetDeltas() {
+  aDelta = 0;
+  bDelta = 0;
+  cDelta = 0;
+}
+
+void blendWS2803(int led) {
+  ledBar[led*3] = (ledBar[((led-1)*3)%nLEDs] + ledBar[((led+1)*3)%nLEDs]) >> 1;
+  ledBar[led*3 + 1] = (ledBar[((led-1)*3 + 1)%nLEDs] + ledBar[((led+1)*3 + 1)%nLEDs])>>1;
+  ledBar[led*3 + 2] = (ledBar[((led-1)*3 + 2)%nLEDs] + ledBar[((led+1)*3 + 2)%nLEDs])>>1;
+}
 
 // Push data to the LEDs from the buffer.
 void loadWS2803(){
   for (int wsOut = 0; wsOut < nLEDs; wsOut++){
     shiftOut(ws2803_dataPin, ws2803_clockPin, MSBFIRST, ledBar[wsOut]);
   }
-  delayMicroseconds(600); // 600us needed to reset WS2803s
+  // Nominally needs 600ms, actually less as we're doing other things
+  // in the meantime. 300 seems a reasonable value given the other
+  // processing done in the loop.
+  delayMicroseconds(600);
 }
 
 // Set the value of the given RGB LED in the buffer.
